@@ -1,6 +1,7 @@
 import { StreamVideoClient, User } from '@stream-io/video-react-sdk';
 
-const apiKey = 'x78rpqd5z6zd';
+// Prefer env var; fall back to provided publishable key for dev
+const apiKey = (import.meta as any).env?.VITE_STREAM_API_KEY ?? 'x78rpqd5z6zd';
 
 // Generate a random user ID for anonymous streaming
 const generateUserId = () => {
