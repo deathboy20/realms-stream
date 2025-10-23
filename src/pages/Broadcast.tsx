@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Video, VideoOff, Mic, MicOff, Monitor, Settings, Users, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -6,6 +6,9 @@ import StreamControls from '@/components/stream/StreamControls';
 import StreamOverlay from '@/components/stream/StreamOverlay';
 import ShareModal from '@/components/stream/ShareModal';
 import { useToast } from '@/components/ui/use-toast';
+import { StreamVideo, StreamCall, Call, ParticipantView } from '@stream-io/video-react-sdk';
+import { initializeStreamClient, createStreamCall } from '@/lib/stream-client';
+import '@stream-io/video-react-sdk/dist/css/styles.css';
 
 const Broadcast = () => {
   const { toast } = useToast();
@@ -16,46 +19,105 @@ const Broadcast = () => {
   const [showShareModal, setShowShareModal] = useState(false);
   const [streamUrl, setStreamUrl] = useState('');
   const [overlayText, setOverlayText] = useState('');
+  const [client, setClient] = useState<any>(null);
+  const [call, setCall] = useState<Call | null>(null);
+  const [callId, setCallId] = useState('');
+
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const { client: streamClient } = await initializeStreamClient();
+        setClient(streamClient);
+      } catch (error) {
+        console.error('Failed to initialize Stream client:', error);
+        toast({
+          title: 'Connection Error',
+          description: 'Failed to connect to streaming service',
+          variant: 'destructive',
+        });
+      }
+    };
+    init();
+
+    return () => {
+      if (call) {
+        call.leave();
+      }
+      if (client) {
+        client.disconnectUser();
+      }
+    };
+  }, []);
 
   const handleStartStream = async () => {
+    if (!client) {
+      toast({
+        title: 'Error',
+        description: 'Stream client not initialized',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     try {
-      // Generate a unique stream ID
-      const streamId = `stream-${Date.now()}`;
-      const url = `${window.location.origin}/stream/${streamId}`;
-      setStreamUrl(url);
+      const generatedCallId = `stream-${Date.now()}`;
+      const streamCall = await createStreamCall(client, generatedCallId);
+      
+      await streamCall.join({ create: true });
+      if (isCameraOn) {
+        await streamCall.camera.enable();
+      }
+      if (!isMuted) {
+        await streamCall.microphone.enable();
+      }
+      
+      setCall(streamCall);
+      setCallId(generatedCallId);
       setIsStreaming(true);
       
+      const url = `${window.location.origin}/stream/${generatedCallId}`;
+      setStreamUrl(url);
+      
       toast({
-        title: "Stream Started",
-        description: "Your broadcast is now live!",
+        title: 'Stream Started',
+        description: 'Your broadcast is now live!',
       });
     } catch (error) {
+      console.error('Failed to start stream:', error);
       toast({
-        title: "Error",
-        description: "Failed to start stream. Please try again.",
-        variant: "destructive",
+        title: 'Stream Error',
+        description: 'Failed to start broadcast. Please try again.',
+        variant: 'destructive',
       });
     }
   };
 
-  const handleStopStream = () => {
+  const handleStopStream = async () => {
+    if (call) {
+      await call.leave();
+      setCall(null);
+    }
     setIsStreaming(false);
     setIsCameraOn(false);
     setIsScreenSharing(false);
+    setCallId('');
     toast({
-      title: "Stream Ended",
-      description: "Your broadcast has been stopped.",
+      title: 'Stream Ended',
+      description: 'Your broadcast has been stopped.',
     });
   };
 
   const toggleCamera = async () => {
     try {
       if (!isCameraOn) {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: !isMuted });
-        // Handle stream
+        if (call && isStreaming) {
+          await call.camera.enable();
+        }
         setIsCameraOn(true);
       } else {
-        // Stop stream
+        if (call && isStreaming) {
+          await call.camera.disable();
+        }
         setIsCameraOn(false);
       }
     } catch (error) {
@@ -67,13 +129,39 @@ const Broadcast = () => {
     }
   };
 
+  const toggleMicrophone = async () => {
+    try {
+      if (isMuted) {
+        if (call && isStreaming) {
+          await call.microphone.enable();
+        }
+        setIsMuted(false);
+      } else {
+        if (call && isStreaming) {
+          await call.microphone.disable();
+        }
+        setIsMuted(true);
+      }
+    } catch (error) {
+      toast({
+        title: "Microphone Error",
+        description: "Unable to access microphone.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const toggleScreenShare = async () => {
     try {
       if (!isScreenSharing) {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+        if (call && isStreaming) {
+          await call.screenShare.enable();
+        }
         setIsScreenSharing(true);
-        setIsCameraOn(false);
       } else {
+        if (call && isStreaming) {
+          await call.screenShare.disable();
+        }
         setIsScreenSharing(false);
       }
     } catch (error) {
@@ -85,64 +173,79 @@ const Broadcast = () => {
     }
   };
 
-  return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b border-border bg-card">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-gradient-primary flex items-center justify-center">
-              <Video className="w-6 h-6 text-primary-foreground" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-foreground">StreamNext</h1>
-              <p className="text-xs text-muted-foreground">Broadcast Studio</p>
-            </div>
-          </div>
-          
-          {isStreaming && (
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 bg-destructive/10 text-destructive px-3 py-1 rounded-full">
-                <div className="w-2 h-2 bg-destructive rounded-full animate-pulse" />
-                <span className="text-sm font-medium">LIVE</span>
-              </div>
-              <Button
-                onClick={() => setShowShareModal(true)}
-                variant="outline"
-                size="sm"
-                className="gap-2"
-              >
-                <Share2 className="w-4 h-4" />
-                Share
-              </Button>
-            </div>
-          )}
+  if (!client) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <Video className="w-16 h-16 mx-auto text-primary animate-pulse" />
+          <p className="text-muted-foreground">Connecting to streaming service...</p>
         </div>
-      </header>
+      </div>
+    );
+  }
 
-      <main className="container mx-auto px-4 py-8">
-        <div className="grid lg:grid-cols-[1fr,320px] gap-6">
-          {/* Video Preview */}
-          <div className="space-y-4">
-            <Card className="relative aspect-video bg-secondary overflow-hidden shadow-strong">
-              {!isCameraOn && !isScreenSharing ? (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="text-center space-y-4">
-                    <VideoOff className="w-16 h-16 text-muted-foreground mx-auto" />
-                    <p className="text-muted-foreground">No video source active</p>
-                  </div>
+  return (
+    <StreamVideo client={client}>
+      <div className="min-h-screen bg-background">
+        <header className="border-b border-border bg-card">
+          <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-gradient-primary flex items-center justify-center">
+                <Video className="w-6 h-6 text-primary-foreground" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-foreground">StreamNext</h1>
+                <p className="text-xs text-muted-foreground">Broadcast Studio</p>
+              </div>
+            </div>
+            
+            {isStreaming && (
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 bg-destructive/10 text-destructive px-3 py-1 rounded-full">
+                  <div className="w-2 h-2 bg-destructive rounded-full animate-pulse" />
+                  <span className="text-sm font-medium">LIVE</span>
                 </div>
-              ) : (
-                <div className="absolute inset-0 bg-gradient-to-br from-primary/20 to-accent/20">
-                  <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
-                    {isScreenSharing ? <Monitor className="w-20 h-20" /> : <Video className="w-20 h-20" />}
+                <Button
+                  onClick={() => setShowShareModal(true)}
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                >
+                  <Share2 className="w-4 h-4" />
+                  Share
+                </Button>
+              </div>
+            )}
+          </div>
+        </header>
+
+        <main className="container mx-auto px-4 py-8">
+          <div className="grid lg:grid-cols-[1fr,320px] gap-6">
+            {/* Video Preview */}
+            <div className="space-y-4">
+              <Card className="relative aspect-video bg-secondary overflow-hidden shadow-strong">
+                {!isStreaming || !call ? (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="text-center space-y-4">
+                      <VideoOff className="w-16 h-16 text-muted-foreground mx-auto" />
+                      <p className="text-muted-foreground">Click "Go Live" to start streaming</p>
+                    </div>
                   </div>
-                </div>
-              )}
-              
-              {overlayText && (
-                <StreamOverlay text={overlayText} />
-              )}
-            </Card>
+                ) : (
+                  <StreamCall call={call}>
+                    <div className="absolute inset-0">
+                      <ParticipantView
+                        participant={call.state.localParticipant!}
+                        ParticipantViewUI={null}
+                      />
+                    </div>
+                  </StreamCall>
+                )}
+                
+                {overlayText && (
+                  <StreamOverlay text={overlayText} />
+                )}
+              </Card>
 
             {/* Stream Controls */}
             <div className="flex items-center justify-center gap-4">
@@ -167,7 +270,7 @@ const Broadcast = () => {
               </Button>
 
               <Button
-                onClick={() => setIsMuted(!isMuted)}
+                onClick={toggleMicrophone}
                 variant={isMuted ? "destructive" : "outline"}
                 size="lg"
                 className="gap-2"
@@ -228,13 +331,14 @@ const Broadcast = () => {
         </div>
       </main>
 
-      {showShareModal && (
-        <ShareModal
-          streamUrl={streamUrl}
-          onClose={() => setShowShareModal(false)}
-        />
-      )}
-    </div>
+        {showShareModal && (
+          <ShareModal
+            streamUrl={streamUrl}
+            onClose={() => setShowShareModal(false)}
+          />
+        )}
+      </div>
+    </StreamVideo>
   );
 };
 
