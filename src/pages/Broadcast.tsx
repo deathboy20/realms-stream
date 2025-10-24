@@ -7,7 +7,7 @@ import StreamOverlay from '@/components/stream/StreamOverlay';
 import ShareModal from '@/components/stream/ShareModal';
 import { useToast } from '@/components/ui/use-toast';
 import { StreamVideo, StreamCall, Call, ParticipantView } from '@stream-io/video-react-sdk';
-import { initializeStreamClient, createStreamCall } from '@/lib/stream-client';
+import { initializeBroadcasterClient, createLivestreamCall, LIVESTREAM_ID } from '@/lib/stream-client';
 import '@stream-io/video-react-sdk/dist/css/styles.css';
 
 const Broadcast = () => {
@@ -21,12 +21,12 @@ const Broadcast = () => {
   const [overlayText, setOverlayText] = useState('');
   const [client, setClient] = useState<any>(null);
   const [call, setCall] = useState<Call | null>(null);
-  const [callId, setCallId] = useState('');
+  const [viewerCount, setViewerCount] = useState(0);
 
   useEffect(() => {
     const init = async () => {
       try {
-        const { client: streamClient } = await initializeStreamClient();
+        const { client: streamClient } = await initializeBroadcasterClient();
         setClient(streamClient);
       } catch (error) {
         console.error('Failed to initialize Stream client:', error);
@@ -49,6 +49,27 @@ const Broadcast = () => {
     };
   }, []);
 
+  // Real-time viewer count updates
+  useEffect(() => {
+    if (!call) return;
+
+    const updateViewerCount = () => {
+      const participants = call.state.participants;
+      // Count all participants except the broadcaster
+      const viewers = participants.filter(p => !p.isLocalParticipant).length;
+      setViewerCount(viewers);
+    };
+
+    updateViewerCount();
+    
+    // Subscribe to participant changes
+    const subscription = call.state.participants$.subscribe(() => {
+      updateViewerCount();
+    });
+
+    return () => subscription.unsubscribe();
+  }, [call]);
+
   const handleStartStream = async () => {
     if (!client) {
       toast({
@@ -60,8 +81,7 @@ const Broadcast = () => {
     }
 
     try {
-      const generatedCallId = `stream-${Date.now()}`;
-      const streamCall = await createStreamCall(client, generatedCallId);
+      const streamCall = await createLivestreamCall(client);
       
       await streamCall.join({ create: true });
       if (isCameraOn) {
@@ -72,10 +92,9 @@ const Broadcast = () => {
       }
       
       setCall(streamCall);
-      setCallId(generatedCallId);
       setIsStreaming(true);
       
-      const url = `${window.location.origin}/stream/${generatedCallId}`;
+      const url = `${window.location.origin}/stream/${LIVESTREAM_ID}`;
       setStreamUrl(url);
       
       toast({
@@ -100,7 +119,7 @@ const Broadcast = () => {
     setIsStreaming(false);
     setIsCameraOn(false);
     setIsScreenSharing(false);
-    setCallId('');
+    setViewerCount(0);
     toast({
       title: 'Stream Ended',
       description: 'Your broadcast has been stopped.',
@@ -322,7 +341,7 @@ const Broadcast = () => {
                     <Users className="w-5 h-5" />
                     Viewers
                   </h3>
-                  <div className="text-2xl font-bold text-primary">0</div>
+                  <div className="text-2xl font-bold text-primary">{viewerCount}</div>
                   <p className="text-xs text-muted-foreground">Currently watching</p>
                 </div>
               )}

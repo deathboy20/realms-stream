@@ -2,26 +2,30 @@ import { StreamVideoClient, User } from '@stream-io/video-react-sdk';
 
 const apiKey = 'x78rpqd5z6zd';
 
+// Your livestream ID from Stream dashboard
+export const LIVESTREAM_ID = 'livestream_c5c61e52-642d-4b49-b574-887d92e82f72';
+
+// Viewer token from Stream dashboard (replace with your full token)
+const VIEWER_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJAc3RyZWFtLWlvL2Rhc2hib2FyZCIsImlhdCI6MTc2MTI1MDIz...';
+
 // Generate a random user ID for anonymous streaming
 const generateUserId = () => {
   return `user-${Math.random().toString(36).substring(2, 11)}`;
 };
 
-// Create and initialize Stream client
-export const initializeStreamClient = async (userId?: string) => {
+// Create and initialize Stream client for broadcasters
+export const initializeBroadcasterClient = async (userId?: string) => {
   const user: User = {
-    id: userId || generateUserId(),
-    name: userId || 'Anonymous User',
+    id: userId || 'broadcaster-' + generateUserId(),
+    name: userId || 'Broadcaster',
   };
 
-  // For development without backend, we'll use a client-side approach
-  // In production, tokens should be generated server-side
   const client = new StreamVideoClient({
     apiKey,
     user,
     tokenProvider: async () => {
-      // Generate a development token client-side
-      // Note: This is for development only. Production apps should generate tokens server-side
+      // Using dev token for broadcaster
+      // In production, generate this server-side with proper permissions
       return client.devToken(user.id);
     },
   });
@@ -29,8 +33,24 @@ export const initializeStreamClient = async (userId?: string) => {
   return { client, user };
 };
 
-export const createStreamCall = async (client: StreamVideoClient, callId: string) => {
-  const call = client.call('default', callId);
+// Create and initialize Stream client for viewers
+export const initializeViewerClient = async (userId?: string) => {
+  const user: User = {
+    id: userId || 'viewer-' + generateUserId(),
+    name: userId || 'Anonymous Viewer',
+  };
+
+  const client = new StreamVideoClient({
+    apiKey,
+    user,
+    token: VIEWER_TOKEN, // Use the viewer token directly
+  });
+
+  return { client, user };
+};
+
+export const createLivestreamCall = async (client: StreamVideoClient) => {
+  const call = client.call('livestream', LIVESTREAM_ID);
   await call.getOrCreate({
     ring: false,
     data: {

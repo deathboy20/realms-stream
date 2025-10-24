@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import QualitySelector from '@/components/stream/QualitySelector';
 import { StreamVideo, StreamCall, Call, ParticipantView } from '@stream-io/video-react-sdk';
-import { initializeStreamClient } from '@/lib/stream-client';
+import { initializeViewerClient, LIVESTREAM_ID } from '@/lib/stream-client';
 import { useToast } from '@/components/ui/use-toast';
 import '@stream-io/video-react-sdk/dist/css/styles.css';
 
@@ -14,7 +14,7 @@ const StreamViewer = () => {
   const navigate = useNavigate();
   const [isMuted, setIsMuted] = useState(false);
   const [quality, setQuality] = useState('auto');
-  const [viewers] = useState(1);
+  const [viewerCount, setViewerCount] = useState(0);
   const [client, setClient] = useState<any>(null);
   const [call, setCall] = useState<Call | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -22,16 +22,11 @@ const StreamViewer = () => {
 
   useEffect(() => {
     const joinStream = async () => {
-      if (!callId) {
-        navigate('/');
-        return;
-      }
-
       try {
-        const { client: streamClient } = await initializeStreamClient();
+        const { client: streamClient } = await initializeViewerClient();
         setClient(streamClient);
 
-        const streamCall = streamClient.call('default', callId);
+        const streamCall = streamClient.call('livestream', LIVESTREAM_ID);
         await streamCall.join();
         
         setCall(streamCall);
@@ -57,7 +52,26 @@ const StreamViewer = () => {
         client.disconnectUser();
       }
     };
-  }, [callId, navigate]);
+  }, [navigate]);
+
+  // Real-time viewer count updates
+  useEffect(() => {
+    if (!call) return;
+
+    const updateViewerCount = () => {
+      const participants = call.state.participants;
+      setViewerCount(participants.length);
+    };
+
+    updateViewerCount();
+    
+    // Subscribe to participant changes
+    const subscription = call.state.participants$.subscribe(() => {
+      updateViewerCount();
+    });
+
+    return () => subscription.unsubscribe();
+  }, [call]);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -73,7 +87,7 @@ const StreamViewer = () => {
         <div className="text-center space-y-4">
           <Video className="w-16 h-16 mx-auto text-primary animate-pulse" />
           <p className="text-muted-foreground">Connecting to stream...</p>
-          <p className="text-muted-foreground/60 text-sm">Stream ID: {callId}</p>
+          <p className="text-muted-foreground/60 text-sm">Stream ID: {LIVESTREAM_ID}</p>
         </div>
       </div>
     );
@@ -106,7 +120,7 @@ const StreamViewer = () => {
               </Button>
               <div className="text-sm">
                 <span className="text-muted-foreground">Stream ID:</span>
-                <span className="ml-2 font-mono text-foreground">{callId}</span>
+                <span className="ml-2 font-mono text-foreground">{LIVESTREAM_ID}</span>
               </div>
               <div className="flex items-center gap-2 bg-destructive/10 text-destructive px-3 py-1 rounded-full">
                 <div className="w-2 h-2 bg-destructive rounded-full animate-pulse" />
@@ -116,7 +130,7 @@ const StreamViewer = () => {
             
             <div className="flex items-center gap-2 text-sm">
               <Users className="w-4 h-4 text-muted-foreground" />
-              <span className="font-semibold text-foreground">{Math.max(1, viewers)}</span>
+              <span className="font-semibold text-foreground">{viewerCount}</span>
               <span className="text-muted-foreground">watching</span>
             </div>
           </div>
